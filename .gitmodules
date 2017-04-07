@@ -1,0 +1,3 @@
+[submodule "vendor/psmoveapi"]
+	path = vendor/psmoveapi
+	url = https://github.com/thp/psmoveapi

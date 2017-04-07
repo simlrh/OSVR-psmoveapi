@@ -1,0 +1,14 @@
+{
+	"deviceVendor": "OSVR",
+	"deviceName": "Comprehensive Plugin Example",
+	"author": "Steve Le Roy Harris <steve@nourish.je>",
+	"version": 1,
+	"lastModified": "2017-04-06T14:23:10.585Z",
+	"interfaces": {
+		"tracker": {
+			"count": 1,
+			"position": true,
+			"orientation": true
+		}
+	}
+}
