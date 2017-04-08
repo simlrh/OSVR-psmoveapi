@@ -1,9 +1,18 @@
 # OSVR-psmoveapi
 
-Dependencies:
+# Dependencies
 
-    git submodule update --init --recursive
-		cd vendor/psmoveapi
-		git apply ../../psmoveapi-patch
+* Eigen3
+* OpenCV2
 
-Then build with cmake
+## Build
+
+    ./build.sh
+
+## Calibrate
+
+	sudo psmove pair
+	sudo psmove calibrate
+	sudo osvr
+
+Print out the calibration mat from PSMoveService and use for the OSVR calibration step.

@@ -57,19 +57,6 @@ namespace {
 
 	typedef Eigen::Transform<float, 3, Eigen::Affine> Transform;
 
-	Eigen::Quaternionf OpenGL_to_Eigen_Quaternion(const float* OpenGL_in) {
-		float m[4][4];
-		std::memcpy(m, OpenGL_in, 16 * sizeof(float));
-
-		float w = sqrt(1 + m[0][0] + m[1][1] + m[2][2]) / 2;
-		float x = (m[2][1] - m[1][2]) / (4 * w);
-		float y = (m[0][2] - m[2][0]) / (4 * w);
-		float z = (m[1][0] - m[0][1]) / (4 * w);
-
-		Eigen::Quaternionf eigenQuat(w, x, y, z);
-		return eigenQuat;
-	}
-
 	template<class Vector3>
 		std::pair<Vector3, Vector3> best_plane_from_points(const std::vector<Vector3> & c)
 		{
@@ -156,14 +143,14 @@ namespace {
 				Eigen::Matrix4f modelViewMatrix;
 				modelViewMatrix << modelView[0], modelView[1], modelView[2], x,
 					modelView[4], modelView[5], modelView[6], -y,
-					modelView[8], modelView[9], modelView[10], z,
+					modelView[8], modelView[9], modelView[10], -z,
 					modelView[12], modelView[13], modelView[14], modelView[15];
 
 				Eigen::Matrix4f calibratedMatrix = m_calibration * modelViewMatrix;
 
 				Eigen::Matrix4f scaledMatrix = Eigen::Scaling(Eigen::Vector4f(0.1, 0.1, 0.1, 0.1)) * calibratedMatrix;
 
-				osvr::util::toPose(scaledMatrix.cast<double>(), pose);
+				osvr::util::toPose(calibratedMatrix.cast<double>(), pose);
 
 				osvrDeviceTrackerSendPose(m_device, m_tracker, &pose, 0);
 
@@ -205,14 +192,9 @@ namespace {
 
 				int step = 5;
 				std::vector<Eigen::Vector3f> points;
-				Eigen::Vector3f origin;
 
-				while (step >= 0) {
-					if (step > 0) {
-						std::cout << "Place controller at position " << (6 - step) << " and press the Move button" << std::endl;
-					} else {
-						std::cout << "Place controller at the origin and press the Move button" << std::endl;
-					}
+				while (step > 0) {
+					std::cout << "Place controller at position " << (6 - step) << " and press the Move button" << std::endl;
 					bool step_complete = false;
 					
 					while (!step_complete) {
@@ -271,13 +253,7 @@ namespace {
 							float x, y, z;
 							psmove_fusion_get_position(m_fusion, move, &x, &y, &z);
 
-							if (step > 0) {
-								points.emplace_back(x, y, z);
-							} else {
-								origin(0) = x;
-								origin(1) = y;
-								origin(2) = z;
-							}
+							points.emplace_back(x, -y, -z);
 
 							step_complete = true;
 						}
@@ -286,19 +262,47 @@ namespace {
 					step -= 1;
 				}
 
+
+
+				// Scale
+				Eigen::Vector3f oneToTwo = points.at(1) - points.at(0);
+				Eigen::Vector3f twoToFour = points.at(3) - points.at(1);
+				Eigen::Vector3f fourToFive = points.at(4) - points.at(3);
+				Eigen::Vector3f fiveToOne = points.at(0) - points.at(4);
+
+				float usLegal[2] = { 0.2159, 0.2794 };
+				Eigen::Vector4f scaleFactors;
+				scaleFactors << 
+					usLegal[1] / oneToTwo.norm(),
+					usLegal[0] / twoToFour.norm(),
+					usLegal[1] / fourToFive.norm(),
+					usLegal[0] / fiveToOne.norm();
+				Eigen::UniformScaling<float> scaling(scaleFactors.mean());
+
+				// Rotation
 				std::pair<Eigen::Vector3f, Eigen::Vector3f> plane = best_plane_from_points(points);
-				Eigen::Vector3f normal = plane.second;
-				normal(1) = fabs(normal(1));
-				Eigen::Vector3f trueNormal(0,1,0);
+				Eigen::Vector3f xzNormal = plane.second;
+				if (xzNormal(1) < 0) xzNormal = -xzNormal;
+				Eigen::Quaternionf xzRotation = Eigen::Quaternionf().setFromTwoVectors(
+					xzNormal, 
+					Eigen::Vector3f(0,1,0)
+				);
+				Eigen::Quaternionf yRotation = Eigen::Quaternionf().setFromTwoVectors(
+					xzRotation * twoToFour,
+					Eigen::Vector3f(0,0,-1)
+				);
+				Eigen::Quaternionf rotation = yRotation * xzRotation;
 
-				Eigen::Quaternionf rotation = Eigen::Quaternionf().setFromTwoVectors(normal, trueNormal);
-				Eigen::Translation3f translation(-origin(0), origin(1), -origin(2));
+				// Translation
+				Eigen::Vector3f origin = points.at(2);
+				Eigen::Translation3f translation(-origin(0), -origin(1), -origin(2));
 
-				std::cout << "Calibration:" << std::endl;
+				std::cout << "Calibration" << std::endl;
 				std::cout << origin(0) << ", " << origin(1) << ", " << origin(2) << std::endl;
-				std::cout << normal(0) << ", " << normal(1) << ", " << normal(2) << std::endl;
+				std::cout << xzNormal(0) << ", " << xzNormal(1) << ", " << xzNormal(2) << std::endl;
+				std::cout << scaleFactors.mean() << std::endl;
 
-				m_calibration = rotation * translation;
+				m_calibration = scaling * rotation * translation;
 
 				psmove_tracker_disable(m_tracker, move);
 				psmove_disconnect(move);
