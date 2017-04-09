@@ -9,6 +9,51 @@
 			"count": 1,
 			"position": true,
 			"orientation": true
+		},
+		"analog": {
+			"count": 1,
+			"traits": [
+				{
+					"min": 0,
+					"max": 255,
+					"rest": 0
+				}
+			]
+		},
+		"button": {
+			"count": 9
+		}
+	},
+	"semantic": {
+		"cross": "button/0",
+		"circle": "button/1",
+		"square": "button/2",
+		"triangle": "button/3",
+		"select": "button/4",
+		"start": "button/5",
+		"ps": "button/6",
+		"move": "button/7",
+		"trigger": "analog/0",
+
+		"triggerPressed": "button/8",
+		"tracker": "tracker/0",
+
+		"controller": {
+			"$target": "tracker/0",
+
+			"1": "button/0",
+			"2": "button/1",
+			"3": "button/2",
+			"4": "button/3",
+
+			"middle": "button/7",
+			"bumper": "button/4",
+
+			"joystick": {
+				"button": "button/6"
+			},
+
+			"trigger": "analog/0"
 		}
 	}
 }

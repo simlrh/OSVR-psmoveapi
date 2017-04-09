@@ -25,6 +25,8 @@
 
 // Internal Includes
 #include <osvr/PluginKit/PluginKit.h>
+#include <osvr/PluginKit/AnalogInterfaceC.h>
+#include <osvr/PluginKit/ButtonInterfaceC.h>
 #include <osvr/PluginKit/TrackerInterfaceC.h>
 #include <osvr/Util/EigenInterop.h>
 #include <osvr/Util/Pose3C.h>
@@ -50,7 +52,8 @@
 #include <cmath>
 #include <vector>
 
-#define STABILIZE_WAIT_TIME_MS 1000
+#define STABILIZE_WAIT_TIME_MS 500
+#define NUM_BUTTONS 9
 
 // Anonymous namespace to avoid symbol collision
 namespace {
@@ -120,6 +123,8 @@ namespace {
 
 				OSVR_DeviceInitOptions opts = osvrDeviceCreateInitOptions(ctx);
 				osvrDeviceTrackerConfigure(opts, &m_tracker);
+				osvrDeviceAnalogConfigure(opts, &m_analog, 1);
+				osvrDeviceButtonConfigure(opts, &m_button, NUM_BUTTONS);
 
 				m_device.initSync(ctx, deviceName, opts);
 				m_device.sendJsonDescriptor(je_nourish_psmovecontroller_json);
@@ -133,6 +138,7 @@ namespace {
 			OSVR_ReturnCode update() {
 				while (psmove_poll(m_move));
 
+				// Tracker
 				OSVR_PoseState pose;
 
 				float x, y, z;
@@ -140,24 +146,41 @@ namespace {
 
 				float* modelView = psmove_fusion_get_modelview_matrix(m_fusion, m_move);
 
-				Eigen::Matrix4f modelViewMatrix;
-				modelViewMatrix << modelView[0], modelView[1], modelView[2], x,
-					modelView[4], modelView[5], modelView[6], -y,
-					modelView[8], modelView[9], modelView[10], -z,
-					modelView[12], modelView[13], modelView[14], modelView[15];
+				// Orientation
+				Eigen::Matrix4f rotation;
+				rotation << modelView[0], modelView[1], modelView[2], modelView[3],
+					modelView[4], modelView[5], modelView[6], modelView[7],
+					modelView[8], modelView[9], modelView[10], modelView[11],
+					0, 0, 0, modelView[15]; // zero out position
+				rotation.transposeInPlace();
 
-				Eigen::Matrix4f calibratedMatrix = m_calibration * modelViewMatrix;
+				Transform translation = m_calibration * Eigen::Translation3f(x, y, z);
 
-				Eigen::Matrix4f scaledMatrix = Eigen::Scaling(Eigen::Vector4f(0.1, 0.1, 0.1, 0.1)) * calibratedMatrix;
+				Eigen::Matrix4f transform = translation * Eigen::AngleAxisf(0.75 * M_PI, Eigen::Vector3f::UnitX()) * rotation;
 
-				osvr::util::toPose(calibratedMatrix.cast<double>(), pose);
+				osvr::util::toPose(transform.cast<double>(), pose);
 
 				osvrDeviceTrackerSendPose(m_device, m_tracker, &pose, 0);
 
-				int buttons = psmove_get_buttons(m_move);
+				// Buttons
+				int pressed = psmove_get_buttons(m_move);
 
-				unsigned int pressed, released;
-				psmove_get_button_events(m_move, &pressed, &released);
+				OSVR_ButtonState buttons[NUM_BUTTONS];
+				buttons[0] = !!(Btn_CROSS & pressed);
+				buttons[1] = !!(Btn_CIRCLE & pressed);
+				buttons[2] = !!(Btn_SQUARE & pressed);
+				buttons[3] = !!(Btn_TRIANGLE & pressed);
+				buttons[4] = !!(Btn_SELECT & pressed);
+				buttons[5] = !!(Btn_START & pressed);
+				buttons[6] = !!(Btn_PS & pressed);
+				buttons[7] = !!(Btn_MOVE & pressed);
+				buttons[8] = !!(Btn_T & pressed);
+
+				osvrDeviceButtonSetValues(m_device, m_button, buttons, NUM_BUTTONS);
+
+				// Trigger
+				OSVR_AnalogState trigger = (double) psmove_get_trigger(m_move);
+				osvrDeviceAnalogSetValue(m_device, m_analog, trigger, 0);
 
 				return OSVR_RETURN_SUCCESS;
 			}
@@ -173,6 +196,8 @@ namespace {
 
 			osvr::pluginkit::DeviceToken m_device;
 			OSVR_TrackerDeviceInterface m_tracker;
+			OSVR_AnalogDeviceInterface m_analog;
+			OSVR_ButtonDeviceInterface m_button;
 	};
 
 	class PSMoveHandler {
@@ -253,7 +278,7 @@ namespace {
 							float x, y, z;
 							psmove_fusion_get_position(m_fusion, move, &x, &y, &z);
 
-							points.emplace_back(x, -y, -z);
+							points.emplace_back(x, y, z);
 
 							step_complete = true;
 						}
@@ -282,7 +307,7 @@ namespace {
 				// Rotation
 				std::pair<Eigen::Vector3f, Eigen::Vector3f> plane = best_plane_from_points(points);
 				Eigen::Vector3f xzNormal = plane.second;
-				if (xzNormal(1) < 0) xzNormal = -xzNormal;
+				if (xzNormal(1) > 0) xzNormal = -xzNormal;
 				Eigen::Quaternionf xzRotation = Eigen::Quaternionf().setFromTwoVectors(
 					xzNormal, 
 					Eigen::Vector3f(0,1,0)
@@ -298,8 +323,8 @@ namespace {
 				Eigen::Translation3f translation(-origin(0), -origin(1), -origin(2));
 
 				std::cout << "Calibration" << std::endl;
-				std::cout << origin(0) << ", " << origin(1) << ", " << origin(2) << std::endl;
-				std::cout << xzNormal(0) << ", " << xzNormal(1) << ", " << xzNormal(2) << std::endl;
+				std::cout << origin(0) << "," << origin(1) << "," << origin(2) << std::endl;
+				std::cout << xzNormal(0) << "," << xzNormal(1) << "," << xzNormal(2) << std::endl;
 				std::cout << scaleFactors.mean() << std::endl;
 
 				m_calibration = scaling * rotation * translation;
