@@ -3,7 +3,7 @@
 # Dependencies
 
 * Eigen3
-* OpenCV2
+* OpenCV2 or OpenCV3
 
 ## Build
 
